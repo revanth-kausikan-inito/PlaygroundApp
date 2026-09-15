@@ -2,7 +2,7 @@ import SwiftUI
 import UserNotifications
 import UIKit
 
-struct ContentView: View {
+struct AlertsView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var authStatus: UNAuthorizationStatus?
@@ -224,5 +224,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    AlertsView()
 }
