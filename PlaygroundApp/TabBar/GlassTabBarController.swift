@@ -71,6 +71,9 @@ final class GlassTabBarController: UITabBarController {
                 image: UIImage(systemName: tab.symbol),
                 tag: tab.rawValue
             )
+            // AlertsView brings its own SwiftUI NavigationStack, so wrapping it in a
+            // UINavigationController too would show two stacked nav bars.
+            guard tab != .alerts else { return controller }
             return UINavigationController(rootViewController: controller)
         }
 
