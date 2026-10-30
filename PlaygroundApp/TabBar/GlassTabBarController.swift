@@ -7,14 +7,14 @@ import UIKit
 final class GlassTabBarController: UITabBarController {
 
     private enum Tab: Int, CaseIterable {
-        case alerts, chart, test, shop, profile
+        case alerts, chart, test, scan, profile
 
         var title: String {
             switch self {
             case .alerts: "Alerts"
             case .chart: "Chart"
             case .test: "Test"
-            case .shop: "Shop"
+            case .scan: "Scan"
             case .profile: "Profile"
             }
         }
@@ -24,8 +24,17 @@ final class GlassTabBarController: UITabBarController {
             case .alerts: "bell.badge"
             case .chart: "chart.xyaxis.line"
             case .test: "checkmark.seal"
-            case .shop: "bag"
+            case .scan: "qrcode.viewfinder"
             case .profile: "person"
+            }
+        }
+
+        /// Screens that bring their own SwiftUI NavigationStack must not be wrapped in a
+        /// UINavigationController too, or two stacked nav bars appear.
+        var ownsNavigationStack: Bool {
+            switch self {
+            case .alerts, .scan: true
+            default: false
             }
         }
     }
@@ -40,7 +49,7 @@ final class GlassTabBarController: UITabBarController {
         /// something drawn by hand.
         var value: String? {
             switch self {
-            case .unread, .acted: "P"
+            case .unread, .acted: "⚬" //✦
             case .empty: ""
             }
         }
@@ -76,9 +85,7 @@ final class GlassTabBarController: UITabBarController {
             }
             controller.tabBarItem = item
 
-            // AlertsView brings its own SwiftUI NavigationStack, so wrapping it in a
-            // UINavigationController too would show two stacked nav bars.
-            guard tab != .alerts else { return controller }
+            guard !tab.ownsNavigationStack else { return controller }
             return UINavigationController(rootViewController: controller)
         }
 
@@ -89,7 +96,9 @@ final class GlassTabBarController: UITabBarController {
         switch tab {
         case .alerts:
             UIHostingController(rootView: AlertsView())
-        case .chart, .test, .shop, .profile:
+        case .scan:
+            UIHostingController(rootView: QRScannerView())
+        case .chart, .test, .profile:
             PlaceholderViewController(title: tab.title)
         }
     }

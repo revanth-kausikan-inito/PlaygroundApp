@@ -1,0 +1,105 @@
+import PhotosUI
+import SwiftUI
+import UIKit
+
+/// Photo-library route into the same detection path as the camera, so the whole flow stays
+/// exercisable in the Simulator — which has no capture device at all.
+///
+/// `PHPickerViewController` runs out of process and needs no photo-library usage description.
+struct QRLibraryPicker: UIViewControllerRepresentable {
+    let onPick: (UIImage) -> Void
+    /// Called whether or not something was picked. The sheet is driven by SwiftUI state, so
+    /// dismissing the picker here instead would leave that state stuck `true` and every later
+    /// "Pick Photo" tap would do nothing — which is what made re-picking the same image fail.
+    let onFinish: () -> Void
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick, onFinish: onFinish)
+    }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        private let onPick: (UIImage) -> Void
+        private let onFinish: () -> Void
+
+        init(onPick: @escaping (UIImage) -> Void, onFinish: @escaping () -> Void) {
+            self.onPick = onPick
+            self.onFinish = onFinish
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            guard let provider = results.first?.itemProvider,
+                  provider.canLoadObject(ofClass: UIImage.self)
+            else {
+                onFinish()
+                return
+            }
+
+            provider.loadObject(ofClass: UIImage.self) { [onPick, onFinish] object, _ in
+                Task { @MainActor in
+                    if let image = object as? UIImage { onPick(image) }
+                    onFinish()
+                }
+            }
+        }
+    }
+}
+
+nonisolated enum QRLibraryImport {
+
+    enum ImportError: LocalizedError {
+        case unreadableImage
+        case noQRCode
+        case encodingFailed
+        case saveFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .unreadableImage: "Could not read that photo."
+            case .noQRCode: "No QR code found in that photo."
+            case .encodingFailed: "Could not encode that photo."
+            case .saveFailed(let reason): "Could not save the capture: \(reason)"
+            }
+        }
+    }
+
+    /// Runs the picked image through the identical detect → encode → persist path the camera
+    /// uses.
+    static func makeRecord(from image: UIImage) throws -> QRCaptureRecord {
+        // Bake any EXIF orientation into the pixels so Vision's `.up` assumption, the stored
+        // JPEG and the corner points all agree — exactly as the rotated capture connection
+        // does on the camera side.
+        guard let upright = upright(image).cgImage else { throw ImportError.unreadableImage }
+        guard let observation = QRDetector.detect(in: upright) else { throw ImportError.noQRCode }
+        guard let jpeg = QRImageEncoder.jpeg(from: upright) else { throw ImportError.encodingFailed }
+
+        let size = CGSize(width: upright.width, height: upright.height)
+        let record = QRDetector.record(from: observation, imagePixelSize: size, source: .library)
+        do {
+            return try QRCaptureStore.save(jpeg: jpeg, record: record)
+        } catch {
+            throw ImportError.saveFailed(error.localizedDescription)
+        }
+    }
+
+    private static func upright(_ image: UIImage) -> UIImage {
+        guard image.imageOrientation != .up else { return image }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+    }
+}
