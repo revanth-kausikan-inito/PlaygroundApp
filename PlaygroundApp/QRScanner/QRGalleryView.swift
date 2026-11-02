@@ -4,6 +4,7 @@ import UIKit
 /// Every stored capture, newest first, with the corner-consistency check on top.
 struct QRGalleryView: View {
     @State private var records: [QRCaptureRecord] = []
+    @State private var isConfirmingDeleteAll = false
 
     var body: some View {
         List {
@@ -30,6 +31,28 @@ struct QRGalleryView: View {
                 }
                 .disabled(records.isEmpty)
             }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) {
+                    isConfirmingDeleteAll = true
+                } label: {
+                    Label("Delete All", systemImage: "trash")
+                }
+                .tint(.red)
+                .disabled(records.isEmpty)
+            }
+        }
+        // Deleting every capture cannot be undone and the button sits in the corner, so it
+        // asks first rather than relying on the swipe-to-delete muscle memory of the rows.
+        .confirmationDialog(
+            "Delete all \(records.count) captures?",
+            isPresented: $isConfirmingDeleteAll,
+            titleVisibility: .visible
+        ) {
+            Button("Delete All", role: .destructive, action: deleteAll)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The stored images and their JSON sidecars are removed from this device. This cannot be undone.")
         }
         .overlay {
             if records.isEmpty {
@@ -41,6 +64,12 @@ struct QRGalleryView: View {
             }
         }
         .onAppear { records = QRCaptureStore.allRecords() }
+    }
+
+    /// Clears the capture directory outright, not just the rows on screen.
+    private func deleteAll() {
+        QRCaptureStore.deleteAll()
+        records = []
     }
 
     /// Removes the JPEG and its sidecar, not just the row.
