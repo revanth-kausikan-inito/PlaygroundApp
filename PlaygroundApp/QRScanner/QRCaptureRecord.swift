@@ -47,6 +47,13 @@ nonisolated struct QRCaptureRecord: Codable, Identifiable, Sendable {
     let confidence: Float
     let source: Source
     let corners: Corners
+    /// Hardware model identifier of the device that took the capture, e.g. `iPhone17,1`.
+    ///
+    /// Optional only so that sidecars written before this field existed still decode — a
+    /// synthesized `decode` uses `decodeIfPresent` for optionals, so an old capture reads
+    /// back as `nil` instead of vanishing from the gallery. Read it through
+    /// `deviceCodeDisplay` rather than unwrapping it at each call site.
+    let deviceCode: String?
 
     init(
         id: UUID = UUID(),
@@ -57,7 +64,8 @@ nonisolated struct QRCaptureRecord: Codable, Identifiable, Sendable {
         symbology: String,
         confidence: Float,
         source: Source,
-        corners: Corners
+        corners: Corners,
+        deviceCode: String = QRDeviceInfo.modelCode
     ) {
         self.id = id
         self.date = date
@@ -69,7 +77,11 @@ nonisolated struct QRCaptureRecord: Codable, Identifiable, Sendable {
         self.confidence = confidence
         self.source = source
         self.corners = corners
+        self.deviceCode = deviceCode
     }
+
+    /// What to show for captures saved before the device code was recorded.
+    var deviceCodeDisplay: String { deviceCode ?? "unknown device" }
 
     var pixelSize: CGSize {
         CGSize(width: imagePixelWidth, height: imagePixelHeight)

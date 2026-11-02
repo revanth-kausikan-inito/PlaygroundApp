@@ -70,6 +70,11 @@ private struct QRCaptureRow: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
+                Text(record.deviceCodeDisplay)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
                 corners
             }
         }
