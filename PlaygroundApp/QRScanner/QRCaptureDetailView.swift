@@ -68,6 +68,12 @@ struct QRCaptureDetailView: View {
                     .font(.footnote)
             }
 
+            labelled("Device") {
+                Text(record.deviceCodeDisplay)
+                    .font(.system(.footnote, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+
             Button {
                 UIPasteboard.general.string = record.payload
             } label: {

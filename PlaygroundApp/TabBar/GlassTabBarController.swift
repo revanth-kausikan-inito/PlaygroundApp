@@ -7,24 +7,24 @@ import UIKit
 final class GlassTabBarController: UITabBarController {
 
     private enum Tab: Int, CaseIterable {
-        case alerts, chart, test, scan, profile
+        case scan, alerts, chart, test, profile
 
         var title: String {
             switch self {
+            case .scan: "Scan"
             case .alerts: "Alerts"
             case .chart: "Chart"
             case .test: "Test"
-            case .scan: "Scan"
             case .profile: "Profile"
             }
         }
 
         var symbol: String {
             switch self {
+            case .scan: "qrcode.viewfinder"
             case .alerts: "bell.badge"
             case .chart: "chart.xyaxis.line"
             case .test: "checkmark.seal"
-            case .scan: "qrcode.viewfinder"
             case .profile: "person"
             }
         }
@@ -33,7 +33,7 @@ final class GlassTabBarController: UITabBarController {
         /// UINavigationController too, or two stacked nav bars appear.
         var ownsNavigationStack: Bool {
             switch self {
-            case .alerts, .scan: true
+            case .scan, .alerts: true
             default: false
             }
         }
@@ -94,10 +94,10 @@ final class GlassTabBarController: UITabBarController {
 
     private func makeViewController(for tab: Tab) -> UIViewController {
         switch tab {
-        case .alerts:
-            UIHostingController(rootView: AlertsView())
         case .scan:
             UIHostingController(rootView: QRScannerView())
+        case .alerts:
+            UIHostingController(rootView: AlertsView())
         case .chart, .test, .profile:
             PlaceholderViewController(title: tab.title)
         }

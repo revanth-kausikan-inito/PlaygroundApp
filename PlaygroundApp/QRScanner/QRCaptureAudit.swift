@@ -37,6 +37,7 @@ nonisolated enum QRCaptureAudit {
                 imagePixelHeight: record.imagePixelHeight,
                 payload: record.payload,
                 source: record.source.rawValue,
+                deviceCode: record.deviceCodeDisplay,
                 corners: record.corners,
                 imageMatchesReference: hash != nil && hash == referenceHash,
                 cornersMatchReference: deviation == 0,
@@ -62,6 +63,8 @@ nonisolated enum QRCaptureAudit {
             maxDeviationPixels: others.map(\.deviationPixels).max() ?? 0,
             allPayloadsIdentical: Set(entries.map { $0.payload ?? "<binary>" }).count <= 1,
             distinctPayloadCount: Set(entries.map { $0.payload ?? "<binary>" }).count,
+            allDevicesIdentical: Set(entries.map(\.deviceCode)).count <= 1,
+            distinctDeviceCount: Set(entries.map(\.deviceCode)).count,
             captures: entries
         )
     }
@@ -97,6 +100,9 @@ struct QRCaptureAuditReport: Codable, Sendable {
         let imagePixelHeight: Int
         let payload: String?
         let source: String
+        /// Hardware model identifier of the capturing device, or `unknown device` for
+        /// captures saved before it was recorded.
+        let deviceCode: String
         let corners: QRCaptureRecord.Corners
         let imageMatchesReference: Bool
         let cornersMatchReference: Bool
@@ -124,6 +130,12 @@ struct QRCaptureAuditReport: Codable, Sendable {
 
     let allPayloadsIdentical: Bool
     let distinctPayloadCount: Int
+
+    /// Whether every capture came off the same hardware. A corner deviation across two
+    /// different devices says something quite different from one on a single device, so the
+    /// report answers that question rather than leaving it to be inferred.
+    let allDevicesIdentical: Bool
+    let distinctDeviceCount: Int
 
     let captures: [Capture]
 
@@ -166,6 +178,8 @@ struct QRCaptureAuditReport: Codable, Sendable {
         maxDeviationPixels: 0,
         allPayloadsIdentical: false,
         distinctPayloadCount: 0,
+        allDevicesIdentical: false,
+        distinctDeviceCount: 0,
         captures: []
     )
 

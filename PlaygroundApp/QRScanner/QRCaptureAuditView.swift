@@ -71,6 +71,12 @@ struct QRCaptureAuditView: View {
                     enabled: report.hasSomethingToCompare,
                     detail: "\(report.distinctPayloadCount) distinct"
                 )
+                checkRow(
+                    "Same device",
+                    passed: report.allDevicesIdentical,
+                    enabled: report.hasSomethingToCompare,
+                    detail: "\(report.distinctDeviceCount) distinct"
+                )
 
                 if !report.allCornersIdentical, report.hasSomethingToCompare {
                     row("Max deviation", String(format: "%.4f px", report.maxDeviationPixels))
@@ -183,6 +189,9 @@ struct QRCaptureAuditView: View {
                     .foregroundStyle(.secondary)
                 Text("\(capture.imagePixelWidth) × \(capture.imagePixelHeight) px · \(capture.source)")
                     .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(capture.deviceCode)
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
         }

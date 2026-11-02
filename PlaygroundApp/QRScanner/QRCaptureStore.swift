@@ -73,6 +73,13 @@ nonisolated enum QRCaptureStore {
         try? FileManager.default.removeItem(at: jsonURL(for: record))
     }
 
+    /// Removes the whole directory rather than each pair in turn, so nothing is left behind
+    /// by a sidecar that failed to decode or a JPEG whose sidecar went missing. It is
+    /// recreated on the next save.
+    static func deleteAll() {
+        try? FileManager.default.removeItem(at: directoryURL)
+    }
+
     private static func createDirectoryIfNeeded() throws {
         let url = directoryURL
         guard !FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return }
