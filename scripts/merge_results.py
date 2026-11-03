@@ -37,6 +37,7 @@ COLS = ["serial", "run_id", "batch_id", "strip_code", "image_id", "image_path", 
         "capture_id", "outcome"]
 CORNER_COLS = ["tl_x", "tl_y", "tr_x", "tr_y", "br_x", "br_y", "bl_x", "bl_y"]
 batch_id = os.path.basename(os.path.normpath(out))
+stem_index = {os.path.splitext(name)[0]: n for n, name in enumerate(inputs)}
 rows, summary = [], []
 
 def image_parts(input_file):
@@ -57,7 +58,15 @@ def fmt(v):
 for devdir in sorted(d for d in glob.glob(os.path.join(out, "*")) if os.path.isdir(os.path.join(d, "QRCaptures")) or os.path.exists(os.path.join(d, "run.log"))):
     udid = os.path.basename(devdir)
     timings = ui_timings(devdir)
-    records = []
+    records, failures = [], []
+    jsonl = os.path.join(devdir, "BatchOutput", "results.jsonl")
+    if os.path.exists(jsonl):
+        for line in open(jsonl):
+            line = line.strip()
+            if not line: continue
+            item = json.loads(line)
+            if not is_current(item): continue
+            (failures if item.get("failed") else records).append(item)
     for p in glob.glob(os.path.join(devdir, "QRCaptures", "**", "*.json"), recursive=True):
         record = json.load(open(p))
         if is_current(record): records.append(record)
@@ -68,7 +77,7 @@ for devdir in sorted(d for d in glob.glob(os.path.join(out, "*")) if os.path.isd
     osv = next((r.get("osVersion") for r in records if r.get("osVersion")), "")
     for r in records:
         rep = r.get("batchRepeat") or 0
-        idx = inputs.index(next((i for i in inputs if r.get("sourceName") and i.startswith(r["sourceName"])), inputs[0])) if inputs else 0
+        idx = stem_index.get(r.get("sourceName"), 0)
         ui = timings.get((rep, idx), ("", ""))
         req, obs, cc = r.get("visionRequestedRevision"), r.get("visionRevision"), r.get("visionRevisionCrosscheck")
         c = r["corners"]
@@ -87,6 +96,12 @@ for devdir in sorted(d for d in glob.glob(os.path.join(out, "*")) if os.path.isd
             "detect_ms": r.get("detectMilliseconds"), "ui_cycle_ms": ui[0], "vision_revision": r.get("visionRevision"),
             "captured_at": r["date"], "capture_id": r["id"], "outcome": ui[1],
         })
+    for f in failures:
+        idx = stem_index.get(f["sourceName"], 0)
+        rows.append({"device_udid": udid, "device_name": f.get("deviceName") or dname, "device_model": f.get("deviceCode", model),
+                     "os_version": f.get("osVersion") or osv, "repeat": f["batchRepeat"], "image_index": idx,
+                     "input_file": inputs[idx] if idx < len(inputs) else "", "found": "no", "captured_at": f["date"],
+                     "outcome": f["error"]})
     # UI cycles that produced no record (no QR found / error) still get a row, so the repeat count stays complete.
     seen = {(r["repeat"], r["image_index"]) for r in rows if r["device_udid"] == udid}
     for key, val in timings.items():
@@ -99,7 +114,7 @@ for devdir in sorted(d for d in glob.glob(os.path.join(out, "*")) if os.path.isd
     cyc = [r["ui_cycle_ms"] for r in rows if r["device_udid"] == udid and r.get("ui_cycle_ms") not in (None, "")]
     wall = ""
     if os.path.exists(os.path.join(devdir, "wall.txt")):
-        wall = open(os.path.join(devdir, "wall.txt")).read().strip().split("=")[1]
+        wall = open(os.path.join(devdir, "wall.txt")).readline().strip().split("=")[1]
     p95 = lambda v: sorted(v)[max(0, int(round(0.95 * len(v))) - 1)] if v else ""
     summary.append({"device_udid": udid, "device_name": dname, "device_model": model, "os_version": osv,
                     "runs": len(records),

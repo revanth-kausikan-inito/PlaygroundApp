@@ -114,6 +114,41 @@ final class BatchUITests: XCTestCase {
         add(attachment)
     }
 
+    /// Folder mode: one tap runs every image in the app's `Documents/BatchInput`, `BATCH_REPEATS`
+    /// times each, with no picker involved. `BATCH_FRESH=0` resumes a partly finished run.
+    func test3_RunFolder() throws {
+        let env = ProcessInfo.processInfo.environment
+        let repeats = Int(env["BATCH_REPEATS"] ?? "") ?? 10
+        let fresh = (env["BATCH_FRESH"] ?? "1") != "0"
+        let timeoutMinutes = Double(env["BATCH_TIMEOUT_MIN"] ?? "") ?? 360
+
+        let app = XCUIApplication(bundleIdentifier: bundleID)
+        app.launchArguments = ["-batchTools", "-verifyRevision", "-batchRepeats", "\(repeats)"]
+            + (fresh ? ["-clearBatchOutput"] : [])
+        app.launch()
+
+        let run = app.buttons["runFolderButton"]
+        XCTAssertTrue(run.waitForExistence(timeout: 30))
+        run.tap()
+
+        let status = app.staticTexts["folderStatus"]
+        XCTAssertTrue(status.waitForExistence(timeout: 30))
+
+        let started = ContinuousClock.now
+        let deadline = Date().addingTimeInterval(timeoutMinutes * 60)
+        var label = status.label
+        while Date() < deadline, !label.hasPrefix("folder: done"), !label.hasPrefix("folder: failed") {
+            Thread.sleep(forTimeInterval: 5)
+            label = status.label
+        }
+
+        let attachment = XCTAttachment(string: "\(label)\nui_wait_ms,\(Self.milliseconds(ContinuousClock.now - started))")
+        attachment.name = "folder_status.txt"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertTrue(label.hasPrefix("folder: done"), "folder run ended with: \(label)")
+    }
+
     /// The picker runs out of process and its cells are not in the app's accessibility tree, so
     /// cells are tapped by position. Layout measured on a 440 x 956 pt screen with the "Private
     /// Access to Photos" banner dismissed: three square columns, first row starting 15.1% down,

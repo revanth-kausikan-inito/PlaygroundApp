@@ -18,7 +18,7 @@ import Photos
     private static let seededKey = "BatchSeeder.seededNames"
     private static let baseKey = "BatchSeeder.baseDate"
 
-    static var inputDirectory: URL {
+    nonisolated static var inputDirectory: URL {
         URL.documentsDirectory.appending(path: "BatchInput", directoryHint: .isDirectory)
     }
 

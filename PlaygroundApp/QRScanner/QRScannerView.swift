@@ -18,6 +18,7 @@ struct QRScannerView: View {
     @State private var importCount = 0
     @State private var lastImportOutcome = "none"
     private let seeder = BatchSeeder.shared
+    private let folderRunner = BatchFolderRunner.shared
 
     /// How long the detected quad stays on screen before scanning resumes.
     private static let rearmDelay = Duration.milliseconds(1500)
@@ -164,6 +165,16 @@ struct QRScannerView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("importStatus")
+
+            if BatchFolderRunner.isEnabled {
+                Button("Run Folder") { folderRunner.start() }
+                    .buttonStyle(.bordered)
+                    .disabled(folderRunner.isRunning)
+                    .accessibilityIdentifier("runFolderButton")
+                Text(folderRunner.status)
+                    .font(.caption2)
+                    .accessibilityIdentifier("folderStatus")
+            }
 
             if let seedStatus = seeder.status {
                 Text(seedStatus)

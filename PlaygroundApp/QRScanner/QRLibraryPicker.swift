@@ -78,6 +78,32 @@ nonisolated enum QRLibraryImport {
     /// Runs the picked image through the identical detect → encode → persist path the camera
     /// uses.
     static func makeRecord(from image: UIImage, sourceName: String? = nil) throws -> QRCaptureRecord {
+        let arguments = ProcessInfo.processInfo.arguments
+        let batchRepeat = arguments.firstIndex(of: "-batchRep")
+            .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
+        let (record, upright) = try detect(
+            image,
+            sourceName: sourceName,
+            batchRepeat: batchRepeat,
+            verifyRevision: arguments.contains("-verifyRevision")
+        )
+        guard let jpeg = QRImageEncoder.jpeg(from: upright) else { throw ImportError.encodingFailed }
+        do {
+            return try QRCaptureStore.save(jpeg: jpeg, record: record)
+        } catch {
+            throw ImportError.saveFailed(error.localizedDescription)
+        }
+    }
+
+    /// Detection alone, with no JPEG and no persistence — the part of the import that is the
+    /// same for the photo picker and for the batch folder run, so both provably go through one
+    /// code path. Also returns the upright image so a caller can reuse it.
+    static func detect(
+        _ image: UIImage,
+        sourceName: String?,
+        batchRepeat: Int?,
+        verifyRevision: Bool
+    ) throws -> (record: QRCaptureRecord, upright: CGImage) {
         // Bake any EXIF orientation into the pixels so Vision's `.up` assumption, the stored
         // JPEG and the corner points all agree — exactly as the rotated capture connection
         // does on the camera side.
@@ -89,12 +115,7 @@ nonisolated enum QRLibraryImport {
             + Double(elapsed.components.attoseconds) / 1e15
         guard let detection = detected else { throw ImportError.noQRCode }
         // Outside the timed section, and only when a batch run asks for it.
-        let arguments = ProcessInfo.processInfo.arguments
-        let crosscheck = arguments.contains("-verifyRevision")
-            ? QRDetector.crosscheck(detection, in: upright) : nil
-        let batchRepeat = arguments.firstIndex(of: "-batchRep")
-            .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
-        guard let jpeg = QRImageEncoder.jpeg(from: upright) else { throw ImportError.encodingFailed }
+        let crosscheck = verifyRevision ? QRDetector.crosscheck(detection, in: upright) : nil
 
         let size = CGSize(width: upright.width, height: upright.height)
         let record = QRDetector.record(
@@ -106,11 +127,7 @@ nonisolated enum QRLibraryImport {
             revisionCrosscheck: crosscheck,
             batchRepeat: batchRepeat
         )
-        do {
-            return try QRCaptureStore.save(jpeg: jpeg, record: record)
-        } catch {
-            throw ImportError.saveFailed(error.localizedDescription)
-        }
+        return (record, upright)
     }
 
     private static func upright(_ image: UIImage) -> UIImage {
