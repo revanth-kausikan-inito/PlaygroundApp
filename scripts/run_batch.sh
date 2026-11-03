@@ -7,7 +7,7 @@
 # At the end, each phone is cleaned (test photos, app files, runner app) unless -k is given.
 # -d is a dry run: picks the images and prints the plan, but builds nothing and touches no phone.
 # COUNT limits the images (0 = every distinct QR). With no UDIDs, every paired iPhone that is
-# reachable (USB, or an active tunnel) is used.
+# connected by USB cable is used (Wi-Fi phones are ignored: the image copy is slow and drops).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -40,7 +40,7 @@ import json, sys
 for d in json.load(open(sys.argv[1]))["result"]["devices"]:
     hw, cp = d.get("hardwareProperties", {}), d.get("connectionProperties", {})
     if hw.get("deviceType") == "iPhone" and cp.get("pairingState") == "paired" \
-       and (cp.get("tunnelState") == "connected" or cp.get("transportType") == "wired") and d.get("deviceProperties", {}).get("developerModeStatus") == "enabled":
+       and cp.get("transportType") == "wired" and d.get("deviceProperties", {}).get("developerModeStatus") != "disabled":
         print(hw["udid"])
 PY
 ))
