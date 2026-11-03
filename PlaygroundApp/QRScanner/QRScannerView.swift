@@ -15,6 +15,9 @@ struct QRScannerView: View {
     @State private var lastPayload: String?
     @State private var isPickingFromLibrary = false
     @State private var libraryMessage: String?
+    @State private var importCount = 0
+    @State private var lastImportOutcome = "none"
+    private let seeder = BatchSeeder.shared
 
     /// How long the detected quad stays on screen before scanning resumes.
     private static let rearmDelay = Duration.milliseconds(1500)
@@ -49,7 +52,7 @@ struct QRScannerView: View {
         }
         .sheet(isPresented: $isPickingFromLibrary) {
             QRLibraryPicker(
-                onPick: { image in Task { await importFromLibrary(image) } },
+                onPick: { image, name in Task { await importFromLibrary(image, name: name) } },
                 onFinish: { isPickingFromLibrary = false }
             )
             .ignoresSafeArea()
@@ -136,6 +139,7 @@ struct QRScannerView: View {
                 } label: {
                     Label("Pick Photo", systemImage: "photo")
                 }
+                .accessibilityIdentifier("pickPhotoButton")
 
                 if authStatus == .authorized, hasCamera {
                     Button {
@@ -153,6 +157,18 @@ struct QRScannerView: View {
                 Text(message)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            // Machine-readable outcome of the latest import, for the batch UI test.
+            Text("imports: \(importCount) | \(lastImportOutcome)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("importStatus")
+
+            if let seedStatus = seeder.status {
+                Text(seedStatus)
+                    .font(.caption2)
+                    .accessibilityIdentifier("seedStatus")
             }
 
             if let lastCapture {
@@ -212,16 +228,18 @@ struct QRScannerView: View {
         engine.arm()
     }
 
-    private func importFromLibrary(_ image: UIImage) async {
+    private func importFromLibrary(_ image: UIImage, name: String?) async {
         libraryMessage = nil
 
         let result = await Task.detached {
-            Result { try QRLibraryImport.makeRecord(from: image) }
+            Result { try QRLibraryImport.makeRecord(from: image, sourceName: name) }
         }.value
+        defer { importCount += 1 }
 
         switch result {
         case .success(let record):
             lastCapture = record
+            lastImportOutcome = "ok \(record.id.uuidString) \(name ?? "-")"
             // Re-importing the same photo is how the gallery's corner check gets something
             // to compare, so make the repeat visible rather than looking like a no-op.
             let sameImageCount = QRCaptureStore.allRecords().filter {
@@ -232,6 +250,7 @@ struct QRScannerView: View {
                 : nil
         case .failure(let error):
             libraryMessage = error.localizedDescription
+            lastImportOutcome = "fail \(name ?? "-") \(error.localizedDescription)"
         }
     }
 

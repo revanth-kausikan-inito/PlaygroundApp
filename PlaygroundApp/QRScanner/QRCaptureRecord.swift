@@ -54,6 +54,14 @@ nonisolated struct QRCaptureRecord: Codable, Identifiable, Sendable {
     /// back as `nil` instead of vanishing from the gallery. Read it through
     /// `deviceCodeDisplay` rather than unwrapping it at each call site.
     let deviceCode: String?
+    /// Time Vision took on this image, in milliseconds. Optional for the same reason as
+    /// `deviceCode`: older sidecars must still decode.
+    let detectMilliseconds: Double?
+    /// The `VNDetectBarcodesRequest` revision that actually ran.
+    let visionRevision: Int?
+    /// Photo-library asset name as reported by the picker, so a batch run can be tied back
+    /// to the input file. `nil` for camera captures.
+    let sourceName: String?
 
     init(
         id: UUID = UUID(),
@@ -65,7 +73,10 @@ nonisolated struct QRCaptureRecord: Codable, Identifiable, Sendable {
         confidence: Float,
         source: Source,
         corners: Corners,
-        deviceCode: String = QRDeviceInfo.modelCode
+        deviceCode: String = QRDeviceInfo.modelCode,
+        detectMilliseconds: Double? = nil,
+        visionRevision: Int? = nil,
+        sourceName: String? = nil
     ) {
         self.id = id
         self.date = date
@@ -78,6 +89,9 @@ nonisolated struct QRCaptureRecord: Codable, Identifiable, Sendable {
         self.source = source
         self.corners = corners
         self.deviceCode = deviceCode
+        self.detectMilliseconds = detectMilliseconds
+        self.visionRevision = visionRevision
+        self.sourceName = sourceName
     }
 
     /// What to show for captures saved before the device code was recorded.

@@ -27,6 +27,9 @@ nonisolated enum QRDetector {
     /// than on every frame.
     private static let workingRevision = Mutex<Int?>(nil)
 
+    /// The revision that last ran successfully, for reporting.
+    static var revisionInUse: Int? { workingRevision.withLock { $0 } }
+
     /// Vision's newest barcode revisions are ML-backed, and creating their inference context
     /// fails outright on some hosts — the iOS Simulator throws
     /// `VNErrorDomain` code 9, "Could not create inference context". The older revisions use
@@ -85,7 +88,9 @@ nonisolated enum QRDetector {
     static func record(
         from observation: VNBarcodeObservation,
         imagePixelSize size: CGSize,
-        source: QRCaptureRecord.Source
+        source: QRCaptureRecord.Source,
+        detectMilliseconds: Double? = nil,
+        sourceName: String? = nil
     ) -> QRCaptureRecord {
         QRCaptureRecord(
             imagePixelWidth: Int(size.width),
@@ -94,7 +99,10 @@ nonisolated enum QRDetector {
             symbology: observation.symbology.rawValue,
             confidence: observation.confidence,
             source: source,
-            corners: corners(from: observation, imagePixelSize: size)
+            corners: corners(from: observation, imagePixelSize: size),
+            detectMilliseconds: detectMilliseconds,
+            visionRevision: revisionInUse,
+            sourceName: sourceName
         )
     }
 }
