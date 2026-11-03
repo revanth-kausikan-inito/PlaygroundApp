@@ -1,27 +1,9 @@
 #!/usr/bin/env python3
-"""Merge per-device QRCaptures sidecars and UI timings into report.csv and summary.csv."""
+"""Merge per-device batch results into report.csv, summary.csv and cross_device.csv."""
 import csv, glob, json, os, re, statistics, sys
 
 out, stage = sys.argv[1], sys.argv[2]
 inputs = sorted(os.listdir(stage))
-
-def ui_timings(devdir):
-    """(repeat, index) -> (ui_cycle_ms, outcome), from the per-repeat xcresult attachments."""
-    result, total = {}, 0
-    for path in glob.glob(os.path.join(devdir, "attachments", "**", "*"), recursive=True):
-        if not os.path.isfile(path) or path.endswith(".json"): continue
-        try:
-            lines = open(path).read().splitlines()
-        except Exception:
-            continue
-        if not lines or not lines[0].startswith("repeat,image_index"): continue
-        for row in csv.DictReader(lines):
-            if row["repeat"] == "total":
-                total += int(row["ui_cycle_ms"])
-            else:
-                result[(int(row["repeat"]), int(row["image_index"]))] = (int(row["ui_cycle_ms"]), row["outcome"])
-    if total: result["total"] = total
-    return result
 
 # Captures older than this run's start are leftovers from an earlier run, never merged.
 from datetime import datetime
@@ -33,8 +15,8 @@ def is_current(record):
 COLS = ["serial", "run_id", "batch_id", "strip_code", "image_id", "image_path", "device_name", "device_model",
         "os_version", "vision_revision", "device_udid", "repeat", "found", "tl_x", "tl_y", "tr_x", "tr_y", "br_x", "br_y", "bl_x", "bl_y",
         "confidence", "vision_requested_revision", "vision_revision_verified",
-        "vision_crosscheck", "vision_supported_revisions", "pixel_w", "pixel_h", "detect_ms", "ui_cycle_ms", "captured_at",
-        "capture_id", "outcome"]
+        "vision_crosscheck", "vision_supported_revisions", "pixel_w", "pixel_h", "detect_ms", "captured_at",
+        "capture_id", "failure_reason"]
 CORNER_COLS = ["tl_x", "tl_y", "tr_x", "tr_y", "br_x", "br_y", "bl_x", "bl_y"]
 batch_id = os.path.basename(os.path.normpath(out))
 stem_index = {os.path.splitext(name)[0]: n for n, name in enumerate(inputs)}
@@ -57,7 +39,6 @@ def fmt(v):
 
 for devdir in sorted(d for d in glob.glob(os.path.join(out, "*")) if os.path.isdir(os.path.join(d, "QRCaptures")) or os.path.exists(os.path.join(d, "run.log"))):
     udid = os.path.basename(devdir)
-    timings = ui_timings(devdir)
     records, failures = [], []
     jsonl = os.path.join(devdir, "BatchOutput", "results.jsonl")
     if os.path.exists(jsonl):
@@ -78,7 +59,6 @@ for devdir in sorted(d for d in glob.glob(os.path.join(out, "*")) if os.path.isd
     for r in records:
         rep = r.get("batchRepeat") or 0
         idx = stem_index.get(r.get("sourceName"), 0)
-        ui = timings.get((rep, idx), ("", ""))
         req, obs, cc = r.get("visionRequestedRevision"), r.get("visionRevision"), r.get("visionRevisionCrosscheck")
         c = r["corners"]
         rows.append({
@@ -93,25 +73,16 @@ for devdir in sorted(d for d in glob.glob(os.path.join(out, "*")) if os.path.isd
             "tl_x": c["topLeft"]["x"], "tl_y": c["topLeft"]["y"], "tr_x": c["topRight"]["x"], "tr_y": c["topRight"]["y"],
             "br_x": c["bottomRight"]["x"], "br_y": c["bottomRight"]["y"], "bl_x": c["bottomLeft"]["x"], "bl_y": c["bottomLeft"]["y"],
             "pixel_w": r["imagePixelWidth"], "pixel_h": r["imagePixelHeight"],
-            "detect_ms": r.get("detectMilliseconds"), "ui_cycle_ms": ui[0], "vision_revision": r.get("visionRevision"),
-            "captured_at": r["date"], "capture_id": r["id"], "outcome": ui[1],
+            "detect_ms": r.get("detectMilliseconds"), "vision_revision": r.get("visionRevision"),
+            "captured_at": r["date"], "capture_id": r["id"],
         })
     for f in failures:
         idx = stem_index.get(f["sourceName"], 0)
         rows.append({"device_udid": udid, "device_name": f.get("deviceName") or dname, "device_model": f.get("deviceCode", model),
                      "os_version": f.get("osVersion") or osv, "repeat": f["batchRepeat"], "image_index": idx,
                      "input_file": inputs[idx] if idx < len(inputs) else "", "found": "no", "captured_at": f["date"],
-                     "outcome": f["error"]})
-    # UI cycles that produced no record (no QR found / error) still get a row, so the repeat count stays complete.
-    seen = {(r["repeat"], r["image_index"]) for r in rows if r["device_udid"] == udid}
-    for key, val in timings.items():
-        if key == "total" or key in seen: continue
-        rep, idx = key
-        rows.append({"device_udid": udid, "device_name": dname, "device_model": model, "os_version": osv,
-                     "repeat": rep, "image_index": idx, "input_file": inputs[idx] if idx < len(inputs) else "",
-                     "found": "no", "ui_cycle_ms": val[0], "outcome": val[1]})
+                     "failure_reason": f["error"]})
     det = [r["detect_ms"] for r in rows if r["device_udid"] == udid and r.get("detect_ms") not in (None, "")]
-    cyc = [r["ui_cycle_ms"] for r in rows if r["device_udid"] == udid and r.get("ui_cycle_ms") not in (None, "")]
     wall = ""
     if os.path.exists(os.path.join(devdir, "wall.txt")):
         wall = open(os.path.join(devdir, "wall.txt")).readline().strip().split("=")[1]
@@ -119,9 +90,8 @@ for devdir in sorted(d for d in glob.glob(os.path.join(out, "*")) if os.path.isd
     summary.append({"device_udid": udid, "device_name": dname, "device_model": model, "os_version": osv,
                     "runs": len(records),
                     "revision_verified": sum(1 for r in rows if r["device_udid"] == udid and r.get("vision_revision_verified") == "yes"),
-                    "xcodebuild_wall_s": wall, "ui_total_ms": timings.get("total", ""),
-                    "ui_cycle_mean_ms": round(statistics.mean(cyc), 1) if cyc else "", "ui_cycle_p95_ms": p95(cyc),
-                    "detect_mean_ms": round(statistics.mean(det), 2) if det else "", "detect_p95_ms": round(p95(det), 2) if det else ""})
+                    "wall_seconds": wall,
+                                        "detect_mean_ms": round(statistics.mean(det), 2) if det else "", "detect_p95_ms": round(p95(det), 2) if det else ""})
 
 # Fill in identifiers. A failed run has no payload of its own, so it borrows the strip code
 # another run of the same image decoded.
@@ -172,13 +142,15 @@ for idx in sorted(by_image):
         "pixel_sizes_distinct": len({(r["pixel_w"], r["pixel_h"]) for r in hits}),
         "vision_revisions": "/".join(sorted({str(r["vision_revision"]) for r in hits})),
     }
+    row["consistent_within_0.001px"] = "yes" if (row["runs_found"] == row["runs_total"] and row["strip_codes_distinct"] == 1
+                                                 and row["max_dev_across_devices_px"] <= 0.001) else "NO"
     row["consistent"] = "yes" if (row["runs_found"] == row["runs_total"] and row["strip_codes_distinct"] == 1
                                   and row["corner_sets_distinct"] == 1) else "NO"
     for model in models:
         d = [float(r["detect_ms"]) for r in hits if r["device_model"] == model and r["detect_ms"] not in (None, "")]
         row[f"detect_mean_ms_{model}"] = round(statistics.mean(d), 2) if d else ""
     cross.append(row)
-CROSS_COLS = ["image_index", "image_id", "input_file", "devices", "runs_total", "runs_found", "consistent", "strip_codes_distinct",
+CROSS_COLS = ["image_index", "image_id", "input_file", "devices", "runs_total", "runs_found", "consistent", "consistent_within_0.001px", "strip_codes_distinct",
               "corner_sets_distinct", "max_dev_within_device_px", "max_dev_across_devices_px",
               "pixel_sizes_distinct", "vision_revisions"] + [f"detect_mean_ms_{m}" for m in models]
 with open(os.path.join(out, "cross_device.csv"), "w", newline="") as f:
