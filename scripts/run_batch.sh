@@ -7,7 +7,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-COUNT=10; REPEATS=3
+COUNT=10; REPEATS=10
 SOURCE="/Users/amitmitra/Repositories/SQPT/AAAE validation images"
 OUT="$ROOT/batch-results/$(date +%Y%m%d-%H%M%S)"
 BUNDLE=com.Inito.PlaygroundApp
@@ -21,6 +21,7 @@ done
 shift $((OPTIND-1))
 
 mkdir -p "$OUT"
+date +%s >"$OUT/started.txt"
 DD="$OUT/derived"; STAGE="$OUT/input"; mkdir -p "$STAGE"
 
 # --- devices
@@ -72,11 +73,18 @@ run_device() {
     xcrun devicectl device copy to --device "$udid" --source "$STAGE" \
       --destination Documents/BatchInput --domain-type appDataContainer --domain-identifier $BUNDLE
     local started=$(date +%s)
-    TEST_RUNNER_BATCH_COUNT=$COUNT TEST_RUNNER_BATCH_REPEATS=$REPEATS \
-    xcodebuild -project "$ROOT/PlaygroundApp.xcodeproj" -scheme PlaygroundApp \
-      -destination "id=$udid" -derivedDataPath "$DD" -resultBundlePath "$dir/result.xcresult" \
-      -skip-testing:PlaygroundAppUITests/BatchUITests/test1b_DumpPicker \
-      -allowProvisioningUpdates test-without-building || true
+    # One retry: the phone sometimes times out enabling automation mode on the first attempt.
+    for attempt in 1 2; do
+      TEST_RUNNER_BATCH_COUNT=$COUNT TEST_RUNNER_BATCH_REPEATS=$REPEATS \
+      xcodebuild -project "$ROOT/PlaygroundApp.xcodeproj" -scheme PlaygroundApp \
+        -destination "id=$udid" -derivedDataPath "$DD" -resultBundlePath "$dir/result$attempt.xcresult" \
+        -skip-testing:PlaygroundAppUITests/BatchUITests/test1b_DumpPicker \
+        -allowProvisioningUpdates test-without-building > "$dir/xcodebuild$attempt.log" 2>&1 || true
+      cat "$dir/xcodebuild$attempt.log"
+      grep -q "Timed out while enabling automation mode" "$dir/xcodebuild$attempt.log" || break
+      echo "attempt $attempt: automation mode timed out, retrying"; sleep 5
+    done
+    mv "$dir/result$attempt.xcresult" "$dir/result.xcresult"
     echo "wall_seconds=$(( $(date +%s) - started ))" >"$dir/wall.txt"
     xcrun devicectl device copy from --device "$udid" --source Documents/QRCaptures \
       --destination "$dir/QRCaptures" --domain-type appDataContainer --domain-identifier $BUNDLE

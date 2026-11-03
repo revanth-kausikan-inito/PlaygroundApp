@@ -87,16 +87,24 @@ nonisolated enum QRLibraryImport {
         let elapsed = ContinuousClock.now - started
         let milliseconds = Double(elapsed.components.seconds) * 1000
             + Double(elapsed.components.attoseconds) / 1e15
-        guard let observation = detected else { throw ImportError.noQRCode }
+        guard let detection = detected else { throw ImportError.noQRCode }
+        // Outside the timed section, and only when a batch run asks for it.
+        let arguments = ProcessInfo.processInfo.arguments
+        let crosscheck = arguments.contains("-verifyRevision")
+            ? QRDetector.crosscheck(detection, in: upright) : nil
+        let batchRepeat = arguments.firstIndex(of: "-batchRep")
+            .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
         guard let jpeg = QRImageEncoder.jpeg(from: upright) else { throw ImportError.encodingFailed }
 
         let size = CGSize(width: upright.width, height: upright.height)
         let record = QRDetector.record(
-            from: observation,
+            from: detection,
             imagePixelSize: size,
             source: .library,
             detectMilliseconds: milliseconds,
-            sourceName: sourceName
+            sourceName: sourceName,
+            revisionCrosscheck: crosscheck,
+            batchRepeat: batchRepeat
         )
         do {
             return try QRCaptureStore.save(jpeg: jpeg, record: record)

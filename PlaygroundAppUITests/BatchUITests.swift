@@ -17,7 +17,7 @@ final class BatchUITests: XCTestCase {
     /// Copies the images in the app's `Documents/BatchInput` into Photos.
     func test1_SeedPhotos() throws {
         let app = XCUIApplication(bundleIdentifier: bundleID)
-        app.launchArguments = ["-seedPhotos"]
+        app.launchArguments = ["-seedPhotos", "-clearCaptures"]
 
         addUIInterruptionMonitor(withDescription: "Photos permission") { alert in
             for title in ["Allow Full Access", "Allow", "OK"] where alert.buttons[title].firstMatch.exists {
@@ -60,13 +60,27 @@ final class BatchUITests: XCTestCase {
         add(shot)
     }
 
-    func test2_Batch() throws {
+    // One test per repeat, so if the runner process dies partway the remaining repeats still
+    // run in a fresh one. Each repeat covers every image once.
+    func test2_Rep01() throws { try runRepeat(1) }
+    func test2_Rep02() throws { try runRepeat(2) }
+    func test2_Rep03() throws { try runRepeat(3) }
+    func test2_Rep04() throws { try runRepeat(4) }
+    func test2_Rep05() throws { try runRepeat(5) }
+    func test2_Rep06() throws { try runRepeat(6) }
+    func test2_Rep07() throws { try runRepeat(7) }
+    func test2_Rep08() throws { try runRepeat(8) }
+    func test2_Rep09() throws { try runRepeat(9) }
+    func test2_Rep10() throws { try runRepeat(10) }
+
+    private func runRepeat(_ rep: Int) throws {
         let env = ProcessInfo.processInfo.environment
         let count = Int(env["BATCH_COUNT"] ?? "") ?? 10
-        let repeats = Int(env["BATCH_REPEATS"] ?? "") ?? 3
+        let repeats = Int(env["BATCH_REPEATS"] ?? "") ?? 10
+        try XCTSkipIf(rep > repeats, "only \(repeats) repeats requested")
 
         let app = XCUIApplication(bundleIdentifier: bundleID)
-        app.launchArguments = ["-clearCaptures"]
+        app.launchArguments = ["-batchRep", "\(rep)", "-verifyRevision"]
         app.launch()
 
         let pick = app.buttons["pickPhotoButton"]
@@ -76,30 +90,26 @@ final class BatchUITests: XCTestCase {
         var rows = ["repeat,image_index,ui_cycle_ms,outcome"]
         let runStart = ContinuousClock.now
 
-        for rep in 1...repeats {
-            for index in 0..<count {
-                let started = ContinuousClock.now
-                let expected = "imports: \(rows.count - 1) |"
+        for index in 0..<count {
+            let started = ContinuousClock.now
 
-                pick.tap()
-                Thread.sleep(forTimeInterval: 1.5)   // let the picker sheet finish presenting
-                tapPickerCell(app, index: index)
+            pick.tap()
+            Thread.sleep(forTimeInterval: 1.5)   // let the picker sheet finish presenting
+            tapPickerCell(app, index: index)
 
-                let predicate = NSPredicate(format: "label BEGINSWITH %@", "imports: \(rows.count) |")
-                let done = XCTNSPredicateExpectation(predicate: predicate, object: status)
-                let result = XCTWaiter().wait(for: [done], timeout: 60)
-                let cycle = ContinuousClock.now - started
+            let predicate = NSPredicate(format: "label BEGINSWITH %@", "imports: \(index + 1) |")
+            let done = XCTNSPredicateExpectation(predicate: predicate, object: status)
+            let result = XCTWaiter().wait(for: [done], timeout: 60)
+            let cycle = ContinuousClock.now - started
 
-                let outcome = result == .completed ? status.label : "TIMEOUT (\(expected))"
-                rows.append("\(rep),\(index),\(Self.milliseconds(cycle)),\"\(outcome)\"")
-            }
+            let outcome = result == .completed ? status.label : "TIMEOUT"
+            rows.append("\(rep),\(index),\(Self.milliseconds(cycle)),\"\(outcome)\"")
         }
 
-        let total = ContinuousClock.now - runStart
-        rows.append("total,,\(Self.milliseconds(total)),")
+        rows.append("total,,\(Self.milliseconds(ContinuousClock.now - runStart)),")
 
         let attachment = XCTAttachment(string: rows.joined(separator: "\n"))
-        attachment.name = "ui_timings.csv"
+        attachment.name = String(format: "ui_timings_rep%02d.csv", rep)
         attachment.lifetime = .keepAlways
         add(attachment)
     }
