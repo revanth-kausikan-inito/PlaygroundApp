@@ -11,16 +11,43 @@ import Vision
 /// `nonisolated` because detection runs on the capture engine's video queue.
 nonisolated enum QRDetector {
 
+    /// A detection plus the evidence for which Vision revision produced it.
+    struct Detection {
+        let observation: VNBarcodeObservation
+        /// The revision set on the request that ran.
+        let requestedRevision: Int
+        /// Every revision this OS supports, newest first — shows whether the newest one ran.
+        let supportedRevisions: [Int]
+
+        /// The revision Vision itself stamped on the result. This is the authoritative value:
+        /// it comes from the observation, not from what this code asked for.
+        var observedRevision: Int { observation.requestRevision }
+    }
+
     /// Both callers hand Vision an already-upright image, so the orientation is always `.up`
     /// and Vision's normalized space maps 1:1 onto the pixels being saved as JPEG. The camera
     /// achieves that by rotating its capture connection rather than by passing `.right` here —
     /// one coordinate space instead of two.
-    static func detect(in pixelBuffer: CVPixelBuffer) -> VNBarcodeObservation? {
+    static func detect(in pixelBuffer: CVPixelBuffer) -> Detection? {
         perform { VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:]) }
     }
 
-    static func detect(in cgImage: CGImage) -> VNBarcodeObservation? {
-        perform { VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:]) }
+    static func detect(in cgImage: CGImage, forcingRevision revision: Int? = nil) -> Detection? {
+        perform(forcing: revision) { VNImageRequestHandler(cgImage: cgImage, orientation: .up, options: [:]) }
+    }
+
+    /// Independent check of the reported revision: runs the same image again with the request
+    /// pinned to the revision the first run reported, and requires the same payload and the
+    /// same four corners to the last bit. If the reported revision were not the one that
+    /// actually ran, the pinned re-run would be a different detector and would not match.
+    static func crosscheck(_ first: Detection, in cgImage: CGImage) -> Bool {
+        guard let again = detect(in: cgImage, forcingRevision: first.observedRevision),
+              again.observedRevision == first.observedRevision
+        else { return false }
+        let a = first.observation, b = again.observation
+        return a.payloadStringValue == b.payloadStringValue
+            && a.topLeft == b.topLeft && a.topRight == b.topRight
+            && a.bottomRight == b.bottomRight && a.bottomLeft == b.bottomLeft
     }
 
     /// Newest revision that actually ran, so the fallback search below happens once rather
@@ -32,8 +59,12 @@ nonisolated enum QRDetector {
     /// `VNErrorDomain` code 9, "Could not create inference context". The older revisions use
     /// the classic detector and work everywhere, and they report corners in the same
     /// normalized space, so falling back costs nothing but accuracy on hard codes.
-    private static func perform(_ makeHandler: () -> VNImageRequestHandler) -> VNBarcodeObservation? {
-        for revision in revisionsToTry() {
+    private static func perform(
+        forcing forced: Int? = nil,
+        _ makeHandler: () -> VNImageRequestHandler
+    ) -> Detection? {
+        let supported = VNDetectBarcodesRequest.supportedRevisions.sorted(by: >)
+        for revision in forced.map({ [$0] }) ?? revisionsToTry(supported) {
             let request = VNDetectBarcodesRequest()
             request.revision = revision
             // Set after the revision: both the symbology filter and the main speed lever,
@@ -46,15 +77,18 @@ nonisolated enum QRDetector {
                 continue
             }
 
-            workingRevision.withLock { $0 = revision }
-            return (request.results ?? []).first { $0.symbology == .qr }
+            if forced == nil { workingRevision.withLock { $0 = revision } }
+            guard let observation = (request.results ?? []).first(where: { $0.symbology == .qr }) else {
+                return nil
+            }
+            return Detection(observation: observation, requestedRevision: revision, supportedRevisions: supported)
         }
         return nil
     }
 
-    private static func revisionsToTry() -> [Int] {
+    private static func revisionsToTry(_ supported: [Int]) -> [Int] {
         if let known = workingRevision.withLock({ $0 }) { return [known] }
-        return VNDetectBarcodesRequest.supportedRevisions.sorted(by: >)
+        return supported
     }
 
     /// Vision reports corners normalized to `[0, 1]` with a **bottom-left origin, y up**,
@@ -83,18 +117,30 @@ nonisolated enum QRDetector {
     }
 
     static func record(
-        from observation: VNBarcodeObservation,
+        from detection: Detection,
         imagePixelSize size: CGSize,
-        source: QRCaptureRecord.Source
+        source: QRCaptureRecord.Source,
+        detectMilliseconds: Double? = nil,
+        sourceName: String? = nil,
+        revisionCrosscheck: Bool? = nil,
+        batchRepeat: Int? = nil
     ) -> QRCaptureRecord {
-        QRCaptureRecord(
+        let observation = detection.observation
+        return QRCaptureRecord(
             imagePixelWidth: Int(size.width),
             imagePixelHeight: Int(size.height),
             payload: observation.payloadStringValue,
             symbology: observation.symbology.rawValue,
             confidence: observation.confidence,
             source: source,
-            corners: corners(from: observation, imagePixelSize: size)
+            corners: corners(from: observation, imagePixelSize: size),
+            detectMilliseconds: detectMilliseconds,
+            visionRevision: detection.observedRevision,
+            sourceName: sourceName,
+            visionRequestedRevision: detection.requestedRevision,
+            visionSupportedRevisions: detection.supportedRevisions,
+            visionRevisionCrosscheck: revisionCrosscheck,
+            batchRepeat: batchRepeat
         )
     }
 }

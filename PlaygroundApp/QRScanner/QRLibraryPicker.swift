@@ -7,7 +7,7 @@ import UIKit
 ///
 /// `PHPickerViewController` runs out of process and needs no photo-library usage description.
 struct QRLibraryPicker: UIViewControllerRepresentable {
-    let onPick: (UIImage) -> Void
+    let onPick: (UIImage, String?) -> Void
     /// Called whether or not something was picked. The sheet is driven by SwiftUI state, so
     /// dismissing the picker here instead would leave that state stuck `true` and every later
     /// "Pick Photo" tap would do nothing — which is what made re-picking the same image fail.
@@ -30,10 +30,10 @@ struct QRLibraryPicker: UIViewControllerRepresentable {
     }
 
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        private let onPick: (UIImage) -> Void
+        private let onPick: (UIImage, String?) -> Void
         private let onFinish: () -> Void
 
-        init(onPick: @escaping (UIImage) -> Void, onFinish: @escaping () -> Void) {
+        init(onPick: @escaping (UIImage, String?) -> Void, onFinish: @escaping () -> Void) {
             self.onPick = onPick
             self.onFinish = onFinish
         }
@@ -46,9 +46,10 @@ struct QRLibraryPicker: UIViewControllerRepresentable {
                 return
             }
 
+            let name = provider.suggestedName
             provider.loadObject(ofClass: UIImage.self) { [onPick, onFinish] object, _ in
                 Task { @MainActor in
-                    if let image = object as? UIImage { onPick(image) }
+                    if let image = object as? UIImage { onPick(image, name) }
                     onFinish()
                 }
             }
@@ -76,21 +77,57 @@ nonisolated enum QRLibraryImport {
 
     /// Runs the picked image through the identical detect → encode → persist path the camera
     /// uses.
-    static func makeRecord(from image: UIImage) throws -> QRCaptureRecord {
-        // Bake any EXIF orientation into the pixels so Vision's `.up` assumption, the stored
-        // JPEG and the corner points all agree — exactly as the rotated capture connection
-        // does on the camera side.
-        guard let upright = upright(image).cgImage else { throw ImportError.unreadableImage }
-        guard let observation = QRDetector.detect(in: upright) else { throw ImportError.noQRCode }
+    static func makeRecord(from image: UIImage, sourceName: String? = nil) throws -> QRCaptureRecord {
+        let arguments = ProcessInfo.processInfo.arguments
+        let batchRepeat = arguments.firstIndex(of: "-batchRep")
+            .flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
+        let (record, upright) = try detect(
+            image,
+            sourceName: sourceName,
+            batchRepeat: batchRepeat,
+            verifyRevision: arguments.contains("-verifyRevision")
+        )
         guard let jpeg = QRImageEncoder.jpeg(from: upright) else { throw ImportError.encodingFailed }
-
-        let size = CGSize(width: upright.width, height: upright.height)
-        let record = QRDetector.record(from: observation, imagePixelSize: size, source: .library)
         do {
             return try QRCaptureStore.save(jpeg: jpeg, record: record)
         } catch {
             throw ImportError.saveFailed(error.localizedDescription)
         }
+    }
+
+    /// Detection alone, with no JPEG and no persistence — the part of the import that is the
+    /// same for the photo picker and for the batch folder run, so both provably go through one
+    /// code path. Also returns the upright image so a caller can reuse it.
+    static func detect(
+        _ image: UIImage,
+        sourceName: String?,
+        batchRepeat: Int?,
+        verifyRevision: Bool
+    ) throws -> (record: QRCaptureRecord, upright: CGImage) {
+        // Bake any EXIF orientation into the pixels so Vision's `.up` assumption, the stored
+        // JPEG and the corner points all agree — exactly as the rotated capture connection
+        // does on the camera side.
+        guard let upright = upright(image).cgImage else { throw ImportError.unreadableImage }
+        let started = ContinuousClock.now
+        let detected = QRDetector.detect(in: upright)
+        let elapsed = ContinuousClock.now - started
+        let milliseconds = Double(elapsed.components.seconds) * 1000
+            + Double(elapsed.components.attoseconds) / 1e15
+        guard let detection = detected else { throw ImportError.noQRCode }
+        // Outside the timed section, and only when a batch run asks for it.
+        let crosscheck = verifyRevision ? QRDetector.crosscheck(detection, in: upright) : nil
+
+        let size = CGSize(width: upright.width, height: upright.height)
+        let record = QRDetector.record(
+            from: detection,
+            imagePixelSize: size,
+            source: .library,
+            detectMilliseconds: milliseconds,
+            sourceName: sourceName,
+            revisionCrosscheck: crosscheck,
+            batchRepeat: batchRepeat
+        )
+        return (record, upright)
     }
 
     private static func upright(_ image: UIImage) -> UIImage {
