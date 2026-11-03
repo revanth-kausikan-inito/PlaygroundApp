@@ -30,6 +30,11 @@ import Photos
         if arguments.contains("-resetSeed") {
             UserDefaults.standard.removeObject(forKey: Self.seededKey)
         }
+        if arguments.contains("-cleanupBatch") {
+            status = "cleanup: running"
+            Task { await cleanUp() }
+            return
+        }
         guard arguments.contains("-seedPhotos") else { return }
         status = "seed: running"
         Task { await seed() }
@@ -78,5 +83,61 @@ import Photos
         }
         UserDefaults.standard.set(Array(seeded), forKey: Self.seededKey)
         status = "seed: done \(names.count)"
+    }
+
+    // MARK: - Cleanup
+
+    /// Photos this seeder added are named `NNN__SQPT-AAAE_...` (see the batch script's staging),
+    /// so nothing else in the library can match.
+    private static let seededNamePattern = #"^\d{3,4}__SQPT-AAAE_"#
+    /// A cleanup that matches more than this is not ours; it refuses rather than delete.
+    private static let maxDeletions = 400
+
+    /// Removes everything the batch testing added: the app's input/output/capture files, and the
+    /// seeded photos. iOS asks for confirmation before deleting photos, and moves them to
+    /// Recently Deleted, from where they leave the phone after 30 days or when it is emptied.
+    private func cleanUp() async {
+        let fm = FileManager.default
+        for url in [Self.inputDirectory, BatchFolderRunner.outputDirectory, QRCaptureStore.directoryURL] {
+            try? fm.removeItem(at: url)
+        }
+        UserDefaults.standard.removeObject(forKey: Self.seededKey)
+        UserDefaults.standard.removeObject(forKey: Self.baseKey)
+
+        let access = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        guard access == .authorized else {
+            status = "cleanup: done files removed; photos not checked (access \(access == .limited ? "limited" : "denied"))"
+            return
+        }
+
+        let options = PHFetchOptions()
+        options.predicate = NSPredicate(
+            format: "mediaType == %d AND creationDate >= %@",
+            PHAssetMediaType.image.rawValue,
+            Date().addingTimeInterval(-30 * 24 * 3600) as NSDate
+        )
+        var matches: [PHAsset] = []
+        PHAsset.fetchAssets(with: options).enumerateObjects { asset, _, _ in
+            let name = PHAssetResource.assetResources(for: asset).first?.originalFilename ?? ""
+            if name.range(of: Self.seededNamePattern, options: .regularExpression) != nil { matches.append(asset) }
+        }
+
+        guard !matches.isEmpty else {
+            status = "cleanup: done files removed; photos deleted 0"
+            return
+        }
+        guard matches.count <= Self.maxDeletions else {
+            status = "cleanup: done files removed; photos NOT deleted (\(matches.count) matched, over the limit)"
+            return
+        }
+        do {
+            let assets = matches as NSArray
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.deleteAssets(assets)
+            }
+            status = "cleanup: done files removed; photos deleted \(matches.count)"
+        } catch {
+            status = "cleanup: done files removed; photos NOT deleted (\(error.localizedDescription))"
+        }
     }
 }

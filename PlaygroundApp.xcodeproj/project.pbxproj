@@ -372,6 +372,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Playground App";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan QR codes and save the captured frame.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Adds test images to the library so batch runs can pick them.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Finds and removes the test images this app added to the library.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -420,6 +421,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "Playground App";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to scan QR codes and save the captured frame.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Adds test images to the library so batch runs can pick them.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Finds and removes the test images this app added to the library.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

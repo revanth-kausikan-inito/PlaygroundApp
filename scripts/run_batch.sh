@@ -2,23 +2,24 @@
 # Runs every distinct-QR image N times on every connected iPhone in parallel (folder mode: one tap
 # in the app, no photo picker) and merges the results.
 #
-#   scripts/run_batch.sh [-d] [-n COUNT] [-r REPEATS] [-s SOURCE_DIR] [-o OUT_DIR] [UDID ...]
+#   scripts/run_batch.sh [-d] [-k] [-n COUNT] [-r REPEATS] [-s SOURCE_DIR] [-o OUT_DIR] [UDID ...]
 #
+# At the end, each phone is cleaned (test photos, app files, runner app) unless -k is given.
 # -d is a dry run: picks the images and prints the plan, but builds nothing and touches no phone.
 # COUNT limits the images (0 = every distinct QR). With no UDIDs, every paired iPhone that is
 # reachable (USB, or an active tunnel) is used.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-COUNT=0; REPEATS=10; DRY=0
+COUNT=0; REPEATS=10; DRY=0; KEEP=0
 SOURCE="/Users/amitmitra/Repositories/SQPT/AAAE validation images"
 OUT="$ROOT/batch-results/$(date +%Y%m%d-%H%M%S)"
 BUNDLE=com.Inito.PlaygroundApp
 MAX_ATTEMPTS=3
 
-while getopts "dn:r:s:o:" opt; do
+while getopts "dkn:r:s:o:" opt; do
   case $opt in
-    d) DRY=1;;
+    d) DRY=1;; k) KEEP=1;;
     n) COUNT=$OPTARG;; r) REPEATS=$OPTARG;; s) SOURCE=$OPTARG;; o) OUT=$OPTARG;;
     *) exit 2;;
   esac
@@ -97,10 +98,13 @@ run_device() {
   {
     # Uninstalling first wipes the app container, so images and results from an earlier run
     # can never be mixed into this one.
+    local t0=$(date +%s)
     xcrun devicectl device uninstall app --device "$udid" $BUNDLE || true
     xcrun devicectl device install app --device "$udid" "$APP"
+    local t1=$(date +%s)
     xcrun devicectl device copy to --device "$udid" --source "$STAGE" \
       --destination Documents/BatchInput --domain-type appDataContainer --domain-identifier $BUNDLE
+    local t2=$(date +%s)
 
     local started=$(date +%s) fresh=1 rows=0
     for attempt in $(seq 1 $MAX_ATTEMPTS); do
@@ -115,10 +119,12 @@ run_device() {
       fresh=0   # later attempts resume where the last one stopped
       sleep 5
     done
-    echo "wall_seconds=$(( $(date +%s) - started ))" >"$dir/wall.txt"
+    local t3=$(date +%s)
+    echo "wall_seconds=$(( t3 - started ))" >"$dir/wall.txt"
     echo "runs=$rows expected=$EXPECTED" >>"$dir/wall.txt"
+    echo "install_s=$(( t1 - t0 )) copy_s=$(( t2 - t1 )) test_and_pull_s=$(( t3 - started )) total_s=$(( t3 - t0 ))" >>"$dir/wall.txt"
   } >"$dir/run.log" 2>&1
-  echo "finished $udid: $(tail -1 "$dir/wall.txt") (log: $dir/run.log)"
+  echo "finished $udid: $(sed -n 2,3p "$dir/wall.txt" | tr '\n' ' ') (log: $dir/run.log)"
 }
 
 pids=()
@@ -126,4 +132,15 @@ for udid in "${UDIDS[@]}"; do run_device "$udid" & pids+=($!); done
 for pid in "${pids[@]}"; do wait "$pid" || true; done
 
 python3 "$ROOT/scripts/merge_results.py" "$OUT" "$STAGE"
+
+# Clean only the phones whose results are complete and safely pulled; an incomplete phone keeps its
+# data so the run can be resumed.
+if [ $KEEP -eq 0 ]; then
+  DONE=()
+  for udid in "${UDIDS[@]}"; do
+    rows=$(grep -o "runs=[0-9]*" "$OUT/$udid/wall.txt" 2>/dev/null | head -1 | cut -d= -f2)
+    if [ "${rows:-0}" -ge "$EXPECTED" ]; then DONE+=("$udid"); else echo "NOT cleaning $udid: run incomplete (${rows:-0}/$EXPECTED)"; fi
+  done
+  [ ${#DONE[@]} -gt 0 ] && "$ROOT/scripts/cleanup_device.sh" -p "$DD" "${DONE[@]}"
+fi
 echo "Report: $OUT/report.csv  Summary: $OUT/summary.csv  Cross-device: $OUT/cross_device.csv  Selection: $OUT/selection.csv"

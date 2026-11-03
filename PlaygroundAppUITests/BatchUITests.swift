@@ -114,6 +114,38 @@ final class BatchUITests: XCTestCase {
         add(attachment)
     }
 
+    /// Removes everything testing added to the phone: app files and the seeded photos.
+    func test9_Cleanup() throws {
+        let app = XCUIApplication(bundleIdentifier: bundleID)
+        app.launchArguments = ["-cleanupBatch"]
+
+        addUIInterruptionMonitor(withDescription: "Photos access and delete confirmation") { alert in
+            for title in ["Allow Full Access", "Delete", "Allow Access to All Photos", "OK"]
+            where alert.buttons[title].firstMatch.exists {
+                alert.buttons[title].firstMatch.tap()
+                return true
+            }
+            return false
+        }
+
+        app.launch()
+        app.tap()
+
+        let status = app.staticTexts["seedStatus"]
+        XCTAssertTrue(status.waitForExistence(timeout: 30), "cleanup status never appeared")
+        let deadline = Date().addingTimeInterval(120)
+        while Date() < deadline, !status.label.hasPrefix("cleanup: done") {
+            app.tap()   // lets the interruption monitor see the system alerts
+            Thread.sleep(forTimeInterval: 1)
+        }
+        let attachment = XCTAttachment(string: status.label)
+        attachment.name = "cleanup_status.txt"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertTrue(status.label.hasPrefix("cleanup: done"), "cleanup ended with: \(status.label)")
+        XCTAssertFalse(status.label.contains("NOT"), "cleanup incomplete: \(status.label)")
+    }
+
     /// Folder mode: one tap runs every image in the app's `Documents/BatchInput`, `BATCH_REPEATS`
     /// times each, with no picker involved. `BATCH_FRESH=0` resumes a partly finished run.
     func test3_RunFolder() throws {
