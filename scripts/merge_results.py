@@ -73,6 +73,53 @@ for devdir in sorted(d for d in glob.glob(os.path.join(out, "*")) if os.path.isd
                     "detect_mean_ms": round(statistics.mean(det), 2) if det else "", "detect_p95_ms": round(p95(det), 2) if det else ""})
 
 rows.sort(key=lambda r: (r["device_udid"], r["repeat"], r["image_index"]))
+
+# --- cross-device comparison: one row per image, across every device and repeat.
+CORNER_KEYS = ["tl_x", "tl_y", "tr_x", "tr_y", "br_x", "br_y", "bl_x", "bl_y"]
+def corner_vec(r): return tuple(float(r[k]) for k in CORNER_KEYS)
+def max_dev(vecs):
+    """Largest distance between any pair of matching corners over all pairs of results, in px."""
+    worst = 0.0
+    for i, a in enumerate(vecs):
+        for b in vecs[i + 1:]:
+            for k in range(0, 8, 2):
+                worst = max(worst, ((a[k] - b[k]) ** 2 + (a[k + 1] - b[k + 1]) ** 2) ** 0.5)
+    return worst
+
+models = sorted({r["device_model"] for r in rows if r["device_model"]})
+cross, by_image = [], {}
+for r in rows:
+    by_image.setdefault(r["image_index"], []).append(r)
+for idx in sorted(by_image):
+    group = by_image[idx]
+    hits = [r for r in group if r["found"] == "yes"]
+    per_dev = {}
+    for r in hits:
+        per_dev.setdefault(r["device_udid"], []).append(r)
+    within = max((max_dev([corner_vec(r) for r in v]) for v in per_dev.values()), default=0.0)
+    row = {
+        "image_index": idx, "input_file": group[0]["input_file"],
+        "devices": len(per_dev), "runs_total": len(group), "runs_found": len(hits),
+        "payloads_distinct": len({r["payload"] for r in hits}),
+        "corner_sets_distinct": len({corner_vec(r) for r in hits}),
+        "max_dev_within_device_px": round(within, 6),
+        "max_dev_across_devices_px": round(max_dev([corner_vec(r) for r in hits]), 6),
+        "pixel_sizes_distinct": len({(r["pixel_w"], r["pixel_h"]) for r in hits}),
+        "vision_revisions": "/".join(sorted({str(r["vision_revision"]) for r in hits})),
+    }
+    row["consistent"] = "yes" if (row["runs_found"] == row["runs_total"] and row["payloads_distinct"] == 1
+                                  and row["corner_sets_distinct"] == 1) else "NO"
+    for model in models:
+        d = [float(r["detect_ms"]) for r in hits if r["device_model"] == model and r["detect_ms"] not in (None, "")]
+        row[f"detect_mean_ms_{model}"] = round(statistics.mean(d), 2) if d else ""
+    cross.append(row)
+CROSS_COLS = ["image_index", "input_file", "devices", "runs_total", "runs_found", "consistent", "payloads_distinct",
+              "corner_sets_distinct", "max_dev_within_device_px", "max_dev_across_devices_px",
+              "pixel_sizes_distinct", "vision_revisions"] + [f"detect_mean_ms_{m}" for m in models]
+with open(os.path.join(out, "cross_device.csv"), "w", newline="") as f:
+    w = csv.DictWriter(f, fieldnames=CROSS_COLS, extrasaction="ignore"); w.writeheader(); w.writerows(cross)
+bad = [c["image_index"] for c in cross if c["consistent"] != "yes"]
+print(f"cross-device: {len(cross)} images, {len(cross) - len(bad)} consistent" + (f", INCONSISTENT: {bad}" if bad else ""))
 for name, cols, data in (("report.csv", COLS, rows), ("summary.csv", list(summary[0].keys()) if summary else [], summary)):
     with open(os.path.join(out, name), "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore"); w.writeheader(); w.writerows(data)

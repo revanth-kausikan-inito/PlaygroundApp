@@ -90,4 +90,4 @@ for udid in "${UDIDS[@]}"; do run_device "$udid" & pids+=($!); done
 for pid in "${pids[@]}"; do wait "$pid" || true; done
 
 python3 "$ROOT/scripts/merge_results.py" "$OUT" "$STAGE"
-echo "Report: $OUT/report.csv  Summary: $OUT/summary.csv"
+echo "Report: $OUT/report.csv  Summary: $OUT/summary.csv  Cross-device: $OUT/cross_device.csv"
