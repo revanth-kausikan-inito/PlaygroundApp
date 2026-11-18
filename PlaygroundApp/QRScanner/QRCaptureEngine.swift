@@ -149,7 +149,7 @@ nonisolated final class QRCaptureEngine: NSObject,
     ) {
         guard isArmed.withLock({ $0 }) else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        guard let observation = QRDetector.detect(in: pixelBuffer) else { return }
+        guard let detection = QRDetector.detect(in: pixelBuffer) else { return }
 
         // Test-and-clear under one lock, so exactly one frame per arming gets through even if
         // detection succeeds on several frames before the main actor reacts.
@@ -167,7 +167,7 @@ nonisolated final class QRCaptureEngine: NSObject,
 
         // All synchronous, so the sample buffer is never retained past this callback.
         guard let jpeg = QRImageEncoder.jpeg(from: pixelBuffer) else { return }
-        let record = QRDetector.record(from: observation, imagePixelSize: size, source: .camera)
+        let record = QRDetector.record(from: detection, imagePixelSize: size, source: .camera)
         guard (try? QRCaptureStore.save(jpeg: jpeg, record: record)) != nil else { return }
 
         continuation.withLock { $0?.yield(record) }

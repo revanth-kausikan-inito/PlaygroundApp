@@ -63,3 +63,6 @@ fastlane/test_output
 
 # MacBook Hidden Files
 .DS_Store
+
+# Batch run output
+batch-results/

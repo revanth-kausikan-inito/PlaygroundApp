@@ -54,6 +54,28 @@ nonisolated struct QRCaptureRecord: Codable, Identifiable, Sendable {
     /// back as `nil` instead of vanishing from the gallery. Read it through
     /// `deviceCodeDisplay` rather than unwrapping it at each call site.
     let deviceCode: String?
+    /// Time Vision took on this image, in milliseconds. Optional for the same reason as
+    /// `deviceCode`: older sidecars must still decode.
+    let detectMilliseconds: Double?
+    /// The `VNDetectBarcodesRequest` revision that actually ran.
+    let visionRevision: Int?
+    /// Photo-library asset name as reported by the picker, so a batch run can be tied back
+    /// to the input file. `nil` for camera captures.
+    let sourceName: String?
+    /// Readable device name and OS version of the capturing device. Optional so older
+    /// sidecars still decode.
+    let deviceName: String?
+    let osVersion: String?
+    /// What was asked of Vision, and every revision the OS supports. `visionRevision` is the
+    /// one Vision stamped on the result itself, so comparing the three shows whether the
+    /// request ran the revision it was given.
+    let visionRequestedRevision: Int?
+    let visionSupportedRevisions: [Int]?
+    /// Whether re-running the image pinned to `visionRevision` reproduced the same payload
+    /// and corners. `nil` when the check was not requested.
+    let visionRevisionCrosscheck: Bool?
+    /// Which repeat of a batch run this was, from the `-batchRep` launch argument.
+    let batchRepeat: Int?
 
     init(
         id: UUID = UUID(),
@@ -65,7 +87,16 @@ nonisolated struct QRCaptureRecord: Codable, Identifiable, Sendable {
         confidence: Float,
         source: Source,
         corners: Corners,
-        deviceCode: String = QRDeviceInfo.modelCode
+        deviceCode: String = QRDeviceInfo.modelCode,
+        detectMilliseconds: Double? = nil,
+        visionRevision: Int? = nil,
+        sourceName: String? = nil,
+        deviceName: String = QRDeviceInfo.marketingName,
+        osVersion: String = QRDeviceInfo.osVersion,
+        visionRequestedRevision: Int? = nil,
+        visionSupportedRevisions: [Int]? = nil,
+        visionRevisionCrosscheck: Bool? = nil,
+        batchRepeat: Int? = nil
     ) {
         self.id = id
         self.date = date
@@ -78,6 +109,15 @@ nonisolated struct QRCaptureRecord: Codable, Identifiable, Sendable {
         self.source = source
         self.corners = corners
         self.deviceCode = deviceCode
+        self.detectMilliseconds = detectMilliseconds
+        self.visionRevision = visionRevision
+        self.sourceName = sourceName
+        self.deviceName = deviceName
+        self.osVersion = osVersion
+        self.visionRequestedRevision = visionRequestedRevision
+        self.visionSupportedRevisions = visionSupportedRevisions
+        self.visionRevisionCrosscheck = visionRevisionCrosscheck
+        self.batchRepeat = batchRepeat
     }
 
     /// What to show for captures saved before the device code was recorded.

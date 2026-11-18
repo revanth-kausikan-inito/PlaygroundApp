@@ -5,6 +5,7 @@ import UserNotifications
     init() {
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         NotificationLogger.log(.lifecycle, "Cold launch")
+        BatchSeeder.shared.runIfRequested()
     }
 
     var body: some Scene {
